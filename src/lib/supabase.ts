@@ -46,7 +46,9 @@ export type Profile = {
   balance: number;
   matches_played: number;
   matches_won: number;
-  status: string;
+   status: string;
+  is_admin: boolean;
+  banned: boolean;
   created_at: string;
 };
 
