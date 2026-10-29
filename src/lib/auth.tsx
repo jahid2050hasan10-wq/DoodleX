@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/supabase';
@@ -8,13 +15,31 @@ type AuthContextType = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (
+    phone: string,
+    password: string,
+    username: string
+  ) => Promise<{ error: string | null }>;
+  signIn: (
+    phone: string,
+    password: string
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function normalizePhone(phone: string) {
+  return phone.replace(/[\s()-]/g, '');
+}
+
+// Internal email alias for Supabase Email Auth.
+// This does NOT verify ownership of the phone number.
+function phoneToEmail(phone: string) {
+  const digits = normalizePhone(phone).replace(/\D/g, '');
+  return `phone-${digits}@login.doodlex.invalid`;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -41,58 +66,90 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, fetchProfile]);
 
   useEffect(() => {
+    let mounted = true;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
+
       if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
+        fetchProfile(session.user.id).finally(() => {
+          if (mounted) setLoading(false);
+        });
       } else {
         setLoading(false);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        (async () => {
-          await fetchProfile(session.user.id);
-        })();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      if (nextSession?.user) {
+        void fetchProfile(nextSession.user.id);
       } else {
         setProfile(null);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchProfile]);
 
-  const signUp = useCallback(async (email: string, password: string, username: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: error.message };
+  const signUp = useCallback(
+    async (phone: string, password: string, username: string) => {
+      const cleanPhone = normalizePhone(phone);
+      const digits = cleanPhone.replace(/\D/g, '');
 
-    if (data.user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: data.user.id,
-        username,
-        email,
-        phone: '',
-        balance: 0,
-        matches_played: 0,
-        matches_won: 0,
-        status: 'active',
-      });
-      if (profileError) {
-        console.error('Profile creation error:', profileError.message);
-        return { error: 'Account created but profile setup failed. Please contact support.' };
+      if (digits.length < 8 || digits.length > 15) {
+        return { error: 'Please enter a valid phone number.' };
       }
+      if (password.length < 6) {
+        return { error: 'Password must be at least 6 characters.' };
+      }
+      if (!username.trim()) {
+        return { error: 'Please enter a username.' };
+      }
+
+      const { error } = await supabase.auth.signUp({
+        email: phoneToEmail(cleanPhone),
+        password,
+        options: {
+          data: {
+            username: username.trim(),
+            phone: cleanPhone,
+          },
+        },
+      });
+
+      if (error) return { error: error.message };
+      return { error: null };
+    },
+    []
+  );
+
+  const signIn = useCallback(async (phone: string, password: string) => {
+    const cleanPhone = normalizePhone(phone);
+    const digits = cleanPhone.replace(/\D/g, '');
+
+    if (digits.length < 8 || digits.length > 15) {
+      return { error: 'Please enter a valid phone number.' };
+    }
+    if (password.length < 6) {
+      return { error: 'Password must be at least 6 characters.' };
     }
 
-    return { error: null };
-  }, []);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: phoneToEmail(cleanPhone),
+      password,
+    });
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
+    if (error) return { error: 'Phone number or password is incorrect.' };
     return { error: null };
   }, []);
 
@@ -103,7 +160,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user, profile, loading, signUp, signIn, signOut, refreshProfile }}
+      value={{
+        session,
+        user,
+        profile,
+        loading,
+        signUp,
+        signIn,
+        signOut,
+        refreshProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>
