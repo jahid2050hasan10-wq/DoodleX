@@ -1,5 +1,6 @@
+
 import { useState } from 'react';
-import { Mail, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, User, Phone, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { DoodleXLogo } from '@/components/DoodleXLogo';
 
@@ -8,7 +9,7 @@ type Mode = 'login' | 'signup';
 export default function AuthScreen() {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
@@ -20,31 +21,34 @@ export default function AuthScreen() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!phone.trim() || !password) {
+      setError('মোবাইল নম্বর ও পাসওয়ার্ড দিন।');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
+
+    if (mode === 'signup' && !username.trim()) {
+      setError('ইউজারনেম দিন।');
+      return;
+    }
+
     setBusy(true);
 
-    if (!email.trim() || !password.trim()) {
-      setError('Please enter your email and password.');
-      setBusy(false);
-      return;
-    }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      setBusy(false);
-      return;
-    }
-    if (mode === 'signup' && !username.trim()) {
-      setError('Please enter a username.');
-      setBusy(false);
-      return;
-    }
+    try {
+      const result =
+        mode === 'login'
+          ? await signIn(phone.trim(), password)
+          : await signUp(phone.trim(), password, username.trim());
 
-    const result =
-      mode === 'login'
-        ? await signIn(email.trim(), password)
-        : await signUp(email.trim(), password, username.trim());
-
-    if (result.error) {
-      setError(result.error);
+      if (result.error) setError(result.error);
+    } catch {
+      setError('সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+    } finally {
       setBusy(false);
     }
   };
@@ -52,7 +56,6 @@ export default function AuthScreen() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-ink-900 px-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
         <div className="mb-8 flex flex-col items-center">
           <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-ink-800 ring-1 ring-ink-600/60">
             <DoodleXLogo className="h-9 w-9" />
@@ -65,19 +68,20 @@ export default function AuthScreen() {
           </p>
         </div>
 
-        {/* Mode toggle */}
         <div className="mb-6 flex rounded-xl border border-ink-600/60 bg-ink-700/40 p-1">
           <button
+            type="button"
             onClick={() => { setMode('login'); setError(''); }}
-            className={`flex-1 rounded-lg py-2.5 text-sm font-bold transition-all ${
+            className={`flex-1 rounded-lg py-2.5 text-sm font-bold ${
               mode === 'login' ? 'bg-ink-700 text-white' : 'text-gray-500'
             }`}
           >
             Login
           </button>
           <button
+            type="button"
             onClick={() => { setMode('signup'); setError(''); }}
-            className={`flex-1 rounded-lg py-2.5 text-sm font-bold transition-all ${
+            className={`flex-1 rounded-lg py-2.5 text-sm font-bold ${
               mode === 'signup' ? 'bg-ink-700 text-white' : 'text-gray-500'
             }`}
           >
@@ -85,7 +89,6 @@ export default function AuthScreen() {
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'signup' && (
             <div>
@@ -100,6 +103,8 @@ export default function AuthScreen() {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Your gamer name"
                   className={inputClass}
+                  autoComplete="username"
+                  required
                 />
               </div>
             </div>
@@ -107,16 +112,18 @@ export default function AuthScreen() {
 
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">
-              Email
+              Mobile Number
             </label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
+              <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+8801XXXXXXXXX"
                 className={inputClass}
+                autoComplete="tel"
+                required
               />
             </div>
           </div>
@@ -133,6 +140,9 @@ export default function AuthScreen() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min 6 characters"
                 className={inputClass}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                minLength={6}
+                required
               />
             </div>
           </div>
@@ -147,7 +157,7 @@ export default function AuthScreen() {
           <button
             type="submit"
             disabled={busy}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-neon-cyan py-3.5 font-display text-base font-bold text-ink-900 transition-all hover:scale-[1.02] disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-neon-cyan py-3.5 font-display text-base font-bold text-ink-900 disabled:opacity-50"
             style={{ boxShadow: '0 0 16px #22f0e655' }}
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -158,7 +168,11 @@ export default function AuthScreen() {
         <p className="mt-5 text-center text-[11px] text-gray-500">
           {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
           <button
-            onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }}
+            type="button"
+            onClick={() => {
+              setMode(mode === 'login' ? 'signup' : 'login');
+              setError('');
+            }}
             className="font-semibold text-neon-cyan hover:underline"
           >
             {mode === 'login' ? 'Sign up' : 'Login'}
