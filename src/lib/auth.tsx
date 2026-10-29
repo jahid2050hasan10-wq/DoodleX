@@ -37,7 +37,6 @@ function normalizePhone(phone: string) {
 function phoneToEmail(phone: string) {
   let digits = normalizePhone(phone).replace(/\D/g, '');
 
-  // Convert Bangladeshi local numbers to one consistent format.
   if (digits.startsWith('8801') && digits.length === 13) {
     digits = digits.slice(2);
   } else if (digits.startsWith('01') && digits.length === 11) {
@@ -69,32 +68,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    if (user) {
-      await fetchProfile(user.id);
-    }
+    if (user) await fetchProfile(user.id);
   }, [user, fetchProfile]);
 
   useEffect(() => {
     let mounted = true;
 
     const loadSession = async () => {
-      const { data, error } = await supabase.auth.getSession();
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!mounted) return;
 
-      if (!mounted) return;
+        if (error) console.error('Session error:', error.message);
 
-      if (error) {
-        console.error('Session error:', error.message);
+        const currentSession = data.session;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+
+        if (currentSession?.user) {
+          await fetchProfile(currentSession.user.id);
+        }
+      } catch (error) {
+        console.error('Could not load session:', error);
+      } finally {
+        if (mounted) setLoading(false);
       }
-
-      const currentSession = data.session;
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-
-      if (currentSession?.user) {
-        await fetchProfile(currentSession.user.id);
-      }
-
-      if (mounted) setLoading(false);
     };
 
     void loadSession();
@@ -110,11 +108,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       } else {
         setLoading(false);
-        setTimeout(() => {
-          if (mounted) {
-            void fetchProfile(nextSession.user.id);
-          }
-        }, 0);
+        void Promise.resolve().then(() => {
+          if (mounted) void fetchProfile(nextSession.user.id);
+        });
       }
     });
 
@@ -131,11 +127,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (digits.length < 8 || digits.length > 15) {
         return { error: 'সঠিক মোবাইল নম্বর দিন।' };
       }
-
       if (password.length < 6) {
         return { error: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।' };
       }
-
       if (!username.trim()) {
         return { error: 'ইউজারনেম দিন।' };
       }
@@ -152,7 +146,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) return { error: error.message };
-
       return { error: null };
     },
     []
@@ -164,7 +157,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (digits.length < 8 || digits.length > 15) {
       return { error: 'সঠিক মোবাইল নম্বর দিন।' };
     }
-
     if (password.length < 6) {
       return { error: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।' };
     }
@@ -174,10 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
     });
 
-    if (error) {
-      return { error: 'মোবাইল নম্বর অথবা পাসওয়ার্ড ভুল।' };
-    }
-
+    if (error) return { error: 'মোবাইল নম্বর অথবা পাসওয়ার্ড ভুল।' };
     return { error: null };
   }, []);
 
@@ -208,10 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-
   if (!context) {
     throw new Error('useAuth must be used within AuthProvider');
   }
-
   return context;
 }
