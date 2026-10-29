@@ -34,10 +34,16 @@ function normalizePhone(phone: string) {
   return phone.replace(/[\s()-]/g, '');
 }
 
-// Internal email alias for Supabase Email Auth.
-// This does NOT verify ownership of the phone number.
 function phoneToEmail(phone: string) {
-  const digits = normalizePhone(phone).replace(/\D/g, '');
+  let digits = normalizePhone(phone).replace(/\D/g, '');
+
+  // Convert Bangladeshi local numbers to one consistent format.
+  if (digits.startsWith('8801') && digits.length === 13) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith('01') && digits.length === 11) {
+    digits = digits.slice(1);
+  }
+
   return `phone-${digits}@login.doodlex.invalid`;
 }
 
@@ -58,29 +64,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Error fetching profile:', error.message);
       return;
     }
+
     setProfile(data as Profile | null);
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    if (user) await fetchProfile(user.id);
+    if (user) {
+      await fetchProfile(user.id);
+    }
   }, [user, fetchProfile]);
 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!mounted) return;
-      setSession(session);
-      setUser(session?.user ?? null);
+    const loadSession = async () => {
+      const { data, error } = await supabase.auth.getSession();
 
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => {
-          if (mounted) setLoading(false);
-        });
-      } else {
-        setLoading(false);
+      if (!mounted) return;
+
+      if (error) {
+        console.error('Session error:', error.message);
       }
-    });
+
+      const currentSession = data.session;
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
+
+      if (currentSession?.user) {
+        await fetchProfile(currentSession.user.id);
+      }
+
+      if (mounted) setLoading(false);
+    };
+
+    void loadSession();
 
     const {
       data: { subscription },
@@ -88,10 +105,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
 
-      if (nextSession?.user) {
-        void fetchProfile(nextSession.user.id);
-      } else {
+      if (!nextSession?.user) {
         setProfile(null);
+        setLoading(false);
+      } else {
+        setLoading(false);
+        setTimeout(() => {
+          if (mounted) {
+            void fetchProfile(nextSession.user.id);
+          }
+        }, 0);
       }
     });
 
@@ -103,58 +126,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = useCallback(
     async (phone: string, password: string, username: string) => {
-      const cleanPhone = normalizePhone(phone);
-      const digits = cleanPhone.replace(/\D/g, '');
+      const digits = normalizePhone(phone).replace(/\D/g, '');
 
       if (digits.length < 8 || digits.length > 15) {
-        return { error: 'Please enter a valid phone number.' };
+        return { error: 'সঠিক মোবাইল নম্বর দিন।' };
       }
+
       if (password.length < 6) {
-        return { error: 'Password must be at least 6 characters.' };
+        return { error: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।' };
       }
+
       if (!username.trim()) {
-        return { error: 'Please enter a username.' };
+        return { error: 'ইউজারনেম দিন।' };
       }
 
       const { error } = await supabase.auth.signUp({
-        email: phoneToEmail(cleanPhone),
+        email: phoneToEmail(phone),
         password,
         options: {
           data: {
             username: username.trim(),
-            phone: cleanPhone,
+            phone: normalizePhone(phone),
           },
         },
       });
 
       if (error) return { error: error.message };
+
       return { error: null };
     },
     []
   );
 
   const signIn = useCallback(async (phone: string, password: string) => {
-    const cleanPhone = normalizePhone(phone);
-    const digits = cleanPhone.replace(/\D/g, '');
+    const digits = normalizePhone(phone).replace(/\D/g, '');
 
     if (digits.length < 8 || digits.length > 15) {
-      return { error: 'Please enter a valid phone number.' };
+      return { error: 'সঠিক মোবাইল নম্বর দিন।' };
     }
+
     if (password.length < 6) {
-      return { error: 'Password must be at least 6 characters.' };
+      return { error: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।' };
     }
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: phoneToEmail(cleanPhone),
+      email: phoneToEmail(phone),
       password,
     });
 
-    if (error) return { error: 'Phone number or password is incorrect.' };
+    if (error) {
+      return { error: 'মোবাইল নম্বর অথবা পাসওয়ার্ড ভুল।' };
+    }
+
     return { error: null };
   }, []);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
     setProfile(null);
   }, []);
 
@@ -177,7 +207,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+
+  return context;
 }
